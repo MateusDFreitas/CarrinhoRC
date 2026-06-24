@@ -1,0 +1,24 @@
+services:
+  carrinhorc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: carrinhorc:humble
+    container_name: carrinhorc
+    network_mode: host
+    privileged: true
+    environment:
+      CAMERA_INDEX: ${CAMERA_INDEX:-0}
+      CAMERA_FPS: ${CAMERA_FPS:-20.0}
+      ENABLE_CAMERA: ${ENABLE_CAMERA:-true}
+      ENABLE_ROSBRIDGE: ${ENABLE_ROSBRIDGE:-true}
+      MAX_LINEAR_SPEED: ${MAX_LINEAR_SPEED:-1.0}
+      MAX_ANGULAR_SPEED: ${MAX_ANGULAR_SPEED:-1.0}
+      DASHBOARD_HOST: ${DASHBOARD_HOST:-0.0.0.0}
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-5173}
+      ROSBRIDGE_URL: ${ROSBRIDGE_URL:-ws://localhost:9090}
+      ROSBRIDGE_PORT: ${ROSBRIDGE_PORT:-9090}
+    volumes:
+      - ./log:/workspace/log
+      - /dev:/dev
+    command: ["/workspace/docker/run-system.sh"]

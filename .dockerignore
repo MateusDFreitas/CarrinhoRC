@@ -1,0 +1,13 @@
+.git/
+.codex/
+.agents/
+
+build/
+install/
+log/
+
+dashboard/node_modules/
+dashboard/dist/
+
+__pycache__/
+*.pyc

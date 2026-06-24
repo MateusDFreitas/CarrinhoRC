@@ -1,0 +1,9 @@
+build/
+install/
+log/
+
+dashboard/dist/
+dashboard/node_modules/
+
+*.pyc
+__pycache__/

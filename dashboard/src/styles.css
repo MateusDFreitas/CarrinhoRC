@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  background: #050505;
+}
+
+button,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
