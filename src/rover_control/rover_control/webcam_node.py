@@ -16,11 +16,13 @@ class WebcamNode(Node):
     def __init__(self):
         super().__init__("webcam_node")
         self.declare_parameter("camera_index", 0)
-        self.declare_parameter("camera_fps", 20.0)
+        self.declare_parameter("camera_source", "")
+        self.declare_parameter("camera_fps", 60.0)
         self.declare_parameter("frame_id", "front_camera")
         self.declare_parameter("jpeg_quality", 80)
 
         self.camera_index = int(self.get_parameter("camera_index").value)
+        self.camera_source = str(self.get_parameter("camera_source").value).strip()
         self.camera_fps = float(self.get_parameter("camera_fps").value)
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.jpeg_quality = int(self.get_parameter("jpeg_quality").value)
@@ -35,14 +37,15 @@ class WebcamNode(Node):
             self.get_logger().error("python3-opencv is not installed; webcam disabled")
             return
 
-        self.capture = cv2.VideoCapture(self.camera_index)
+        source = self.camera_source if self.camera_source else self.camera_index
+        self.capture = cv2.VideoCapture(source)
         if not self.capture.isOpened():
-            self.get_logger().error(f"could not open camera index {self.camera_index}")
+            self.get_logger().error(f"could not open camera source {source}")
             return
 
         period = 1.0 / max(1.0, self.camera_fps)
         self.timer = self.create_timer(period, self.publish_frame)
-        self.get_logger().info(f"publishing webcam {self.camera_index} at {self.camera_fps} FPS")
+        self.get_logger().info(f"publishing camera {source} at {self.camera_fps} FPS")
 
     def publish_frame(self):
         ok, frame = self.capture.read()

@@ -11,7 +11,8 @@ ROSBRIDGE_URL ?= ws://localhost:9090
 ROSBRIDGE_PORT ?= 9090
 
 CAMERA_INDEX ?= 0
-CAMERA_FPS ?= 20.0
+CAMERA_SOURCE ?=
+CAMERA_FPS ?= 60.0
 ENABLE_CAMERA ?= true
 ENABLE_ROSBRIDGE ?= true
 MAX_LINEAR_SPEED ?= 1.0
@@ -38,6 +39,7 @@ help:
 	@echo "Variaveis uteis:"
 	@echo "  ROS_DISTRO=$(ROS_DISTRO)"
 	@echo "  CAMERA_INDEX=$(CAMERA_INDEX)"
+	@echo "  CAMERA_SOURCE=$(CAMERA_SOURCE)"
 	@echo "  ENABLE_CAMERA=$(ENABLE_CAMERA)"
 	@echo "  ENABLE_ROSBRIDGE=$(ENABLE_ROSBRIDGE)"
 	@echo "  DASHBOARD_PORT=$(DASHBOARD_PORT)"
@@ -80,8 +82,9 @@ run: build-ros deps
 	export ROS_LOG_DIR="$(ROS_LOG_DIR)"; \
 	export VITE_ROSBRIDGE_URL="$(ROSBRIDGE_URL)"; \
 	echo "Iniciando ROS2..."; \
-	ros2 launch rover_bringup rover.launch.py \
+		ros2 launch rover_bringup rover.launch.py \
 		camera_index:=$(CAMERA_INDEX) \
+		camera_source:="$(CAMERA_SOURCE)" \
 		camera_fps:=$(CAMERA_FPS) \
 		enable_camera:=$(ENABLE_CAMERA) \
 		enable_rosbridge:=$(ENABLE_ROSBRIDGE) \
@@ -99,6 +102,7 @@ run-ros: build-ros
 	source install/setup.bash && \
 	ROS_LOG_DIR="$(ROS_LOG_DIR)" ros2 launch rover_bringup rover.launch.py \
 		camera_index:=$(CAMERA_INDEX) \
+		camera_source:="$(CAMERA_SOURCE)" \
 		camera_fps:=$(CAMERA_FPS) \
 		enable_camera:=$(ENABLE_CAMERA) \
 		enable_rosbridge:=$(ENABLE_ROSBRIDGE) \
@@ -114,6 +118,7 @@ docker-build:
 
 docker-run:
 	CAMERA_INDEX="$(CAMERA_INDEX)" \
+	CAMERA_SOURCE="$(CAMERA_SOURCE)" \
 	CAMERA_FPS="$(CAMERA_FPS)" \
 	ENABLE_CAMERA="$(ENABLE_CAMERA)" \
 	ENABLE_ROSBRIDGE="$(ENABLE_ROSBRIDGE)" \

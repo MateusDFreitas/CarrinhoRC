@@ -2,7 +2,8 @@
 set -e
 
 CAMERA_INDEX="${CAMERA_INDEX:-0}"
-CAMERA_FPS="${CAMERA_FPS:-20.0}"
+CAMERA_SOURCE="${CAMERA_SOURCE:-}"
+CAMERA_FPS="${CAMERA_FPS:-60.0}"
 ENABLE_CAMERA="${ENABLE_CAMERA:-true}"
 ENABLE_ROSBRIDGE="${ENABLE_ROSBRIDGE:-true}"
 MAX_LINEAR_SPEED="${MAX_LINEAR_SPEED:-1.0}"
@@ -20,6 +21,7 @@ export VITE_ROSBRIDGE_URL="${ROSBRIDGE_URL}"
 echo "Iniciando ROS2..."
 ros2 launch rover_bringup rover.launch.py \
   camera_index:="${CAMERA_INDEX}" \
+  camera_source:="${CAMERA_SOURCE}" \
   camera_fps:="${CAMERA_FPS}" \
   enable_camera:="${ENABLE_CAMERA}" \
   enable_rosbridge:="${ENABLE_ROSBRIDGE}" \

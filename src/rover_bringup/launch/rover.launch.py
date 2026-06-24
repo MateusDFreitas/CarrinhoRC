@@ -13,6 +13,7 @@ def is_enabled(value):
 
 def launch_setup(context, *args, **kwargs):
     camera_index = LaunchConfiguration("camera_index")
+    camera_source = LaunchConfiguration("camera_source")
     camera_fps = LaunchConfiguration("camera_fps")
     max_linear_speed = LaunchConfiguration("max_linear_speed")
     max_angular_speed = LaunchConfiguration("max_angular_speed")
@@ -77,6 +78,7 @@ def launch_setup(context, *args, **kwargs):
                 parameters=[
                     {
                         "camera_index": camera_index,
+                        "camera_source": camera_source,
                         "camera_fps": camera_fps,
                     }
                 ],
@@ -92,7 +94,8 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("camera_index", default_value="0"),
-            DeclareLaunchArgument("camera_fps", default_value="20.0"),
+            DeclareLaunchArgument("camera_source", default_value=""),
+            DeclareLaunchArgument("camera_fps", default_value="60.0"),
             DeclareLaunchArgument("max_linear_speed", default_value="1.0"),
             DeclareLaunchArgument("max_angular_speed", default_value="1.0"),
             DeclareLaunchArgument("enable_camera", default_value="true"),

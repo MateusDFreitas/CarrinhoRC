@@ -50,7 +50,7 @@ make clean
 Parametros podem ser passados como variaveis:
 
 ```bash
-make run CAMERA_INDEX=0 CAMERA_FPS=20 DASHBOARD_PORT=5173
+make run CAMERA_INDEX=0 CAMERA_FPS=60 DASHBOARD_PORT=5173
 make run ROSBRIDGE_URL=ws://IP_DO_ROBO:9090
 make run ENABLE_CAMERA=false
 ```
@@ -96,6 +96,33 @@ Se `9090` ou `5173` ja estiverem em uso:
 make docker-run DASHBOARD_PORT=5174 ROSBRIDGE_PORT=9091 ROSBRIDGE_URL=ws://localhost:9091
 ```
 
+### Docker no Windows
+
+No Windows, Docker Desktop geralmente nao consegue acessar webcam USB como `/dev/video0`. Use uma camera em rede, por exemplo DroidCam, Iriun, OBS/RTSP, camera IP ou outro app que exponha HTTP/RTSP.
+
+Exemplos no PowerShell:
+
+```powershell
+$env:CAMERA_SOURCE="http://IP_DA_CAMERA:8080/video"
+$env:ROSBRIDGE_URL="ws://localhost:9090"
+docker compose up --build
+```
+
+Ou RTSP:
+
+```powershell
+$env:CAMERA_SOURCE="rtsp://IP_DA_CAMERA:8554/camera"
+docker compose up --build
+```
+
+Para limpar variaveis no PowerShell:
+
+```powershell
+Remove-Item Env:CAMERA_SOURCE
+```
+
+No Linux, deixe `CAMERA_SOURCE` vazio e use `CAMERA_INDEX`, que mapeia `/dev/video0`, `/dev/video1`, etc.
+
 ## Como rodar manualmente
 
 Build do workspace:
@@ -131,7 +158,7 @@ VITE_ROSBRIDGE_URL=ws://IP_DO_ROBO:9090 npm run dev
 ## Parametros uteis
 
 ```bash
-ros2 launch rover_bringup rover.launch.py camera_index:=0 camera_fps:=20 max_linear_speed:=1.0 max_angular_speed:=1.0 rosbridge_port:=9090
+ros2 launch rover_bringup rover.launch.py camera_index:=0 camera_source:="" camera_fps:=60 max_linear_speed:=1.0 max_angular_speed:=1.0 rosbridge_port:=9090
 ```
 
 Os limites de PWM ficam no `manual_control_node`:
