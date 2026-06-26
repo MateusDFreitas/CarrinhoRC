@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -38,8 +38,14 @@ export default function App() {
     { time: new Date().toLocaleTimeString(), msg: 'DASHBOARD INICIADA. CONECTANDO AO BACKEND SERIAL.' },
   ]);
 
-  const speedInterval = useRef(null);
-  const stopTimer = useRef(null);
+  const commandInterval = useRef(null);
+  const driveRef = useRef('stop');
+  const steerRef = useRef('center');
+  const speedLimitRef = useRef(speedLimit);
+  const joystickRef = useRef(null);
+  const [activeDrive, setActiveDrive] = useState('stop');
+  const [activeSteer, setActiveSteer] = useState('center');
+  const [joystickX, setJoystickX] = useState(0);
 
   const addLog = (msg) => {
     setLogs((prev) => [{ time: new Date().toLocaleTimeString(), msg }, ...prev].slice(0, 20));
@@ -84,59 +90,113 @@ export default function App() {
     return () => clearInterval(statusTimer);
   }, []);
 
-  const sendPwm = async (channel, value) => {
+  useEffect(() => {
+    speedLimitRef.current = speedLimit;
+  }, [speedLimit]);
+
+  const sendPwm = async (channel, value, shouldLog = true) => {
     try {
       await api('/api/command', {
         method: 'POST',
         body: JSON.stringify({ channel, value }),
       });
-      addLog(`PWM_${channel.toUpperCase()}: ${value}`);
+      if (shouldLog) addLog(`PWM_${channel.toUpperCase()}: ${value}`);
     } catch (error) {
       addLog(`SERIAL_ERRO: ${error.message}`);
     }
   };
 
-  const commandForDirection = useMemo(
-    () => ({
-      Frente: { esc: pwmFromSpeedLimit(speedLimit), servo: SERVO_CENTER_PWM },
-      Trás: { esc: ESC_STOP_PWM, servo: SERVO_CENTER_PWM },
-      Esquerda: { servo: SERVO_LEFT_PWM },
-      Direita: { servo: SERVO_RIGHT_PWM },
-    }),
-    [speedLimit],
-  );
+  const getEscPwm = () => (driveRef.current === 'forward' ? pwmFromSpeedLimit(speedLimitRef.current) : ESC_STOP_PWM);
 
-  const handleMove = (direction) => {
-    const command = commandForDirection[direction];
-    if (!command) return;
+  const getServoPwm = () => {
+    if (steerRef.current === 'left') return SERVO_LEFT_PWM;
+    if (steerRef.current === 'right') return SERVO_RIGHT_PWM;
+    return SERVO_CENTER_PWM;
+  };
 
-    setStatus(direction);
-    addLog(`CMD_MOVE: ${direction.toUpperCase()}`);
-    if (command.servo) sendPwm('servo', command.servo);
-    if (command.esc) sendPwm('esc', command.esc);
+  const updateControlStatus = () => {
+    const driveLabel = driveRef.current === 'forward' ? 'Frente' : 'Standby';
+    const steerLabel = steerRef.current === 'left' ? 'Esquerda' : steerRef.current === 'right' ? 'Direita' : '';
+    setStatus(steerLabel && driveRef.current === 'forward' ? `${driveLabel} + ${steerLabel}` : steerLabel || driveLabel);
+  };
 
-    clearInterval(speedInterval.current);
-    clearInterval(stopTimer.current);
-    speedInterval.current = setInterval(() => {
-      if (command.servo) sendPwm('servo', command.servo);
-      if (command.esc) sendPwm('esc', command.esc);
-    }, 250);
+  const sendCurrentCommand = (shouldLog = false) => {
+    sendPwm('esc', getEscPwm(), shouldLog);
+    sendPwm('servo', getServoPwm(), shouldLog);
+  };
+
+  const ensureCommandLoop = () => {
+    if (commandInterval.current) return;
+    commandInterval.current = setInterval(() => sendCurrentCommand(false), 250);
+  };
+
+  const stopCommandLoop = () => {
+    clearInterval(commandInterval.current);
+    commandInterval.current = null;
+  };
+
+  const setDrive = (drive) => {
+    if (driveRef.current === drive) return;
+    driveRef.current = drive;
+    setActiveDrive(drive);
+    updateControlStatus();
+    addLog(drive === 'forward' ? 'CMD_DRIVE: FRENTE' : 'CMD_DRIVE: NEUTRO');
+    sendCurrentCommand(true);
+    ensureCommandLoop();
+    if (driveRef.current === 'stop' && steerRef.current === 'center') stopCommandLoop();
+  };
+
+  const setSteer = (steer) => {
+    if (steerRef.current === steer) return;
+    steerRef.current = steer;
+    setActiveSteer(steer);
+    updateControlStatus();
+    if (steer !== 'center') addLog(`CMD_STEER: ${steer === 'left' ? 'ESQUERDA' : 'DIREITA'}`);
+    sendCurrentCommand(true);
+    ensureCommandLoop();
+    if (driveRef.current === 'stop' && steerRef.current === 'center') stopCommandLoop();
   };
 
   const handleStop = async () => {
+    driveRef.current = 'stop';
+    steerRef.current = 'center';
+    setActiveDrive('stop');
+    setActiveSteer('center');
+    setJoystickX(0);
     setStatus('Standby');
+    stopCommandLoop();
     addLog('CMD_STOP: E1500 S1500 enviado');
-    clearInterval(speedInterval.current);
-    clearInterval(stopTimer.current);
     try {
       await api('/api/stop', { method: 'POST', body: '{}' });
     } catch (error) {
       addLog(`SERIAL_ERRO: ${error.message}`);
     }
-    stopTimer.current = setInterval(() => {
-      api('/api/stop', { method: 'POST', body: '{}' }).catch((error) => addLog(`SERIAL_ERRO: ${error.message}`));
-    }, 250);
-    setTimeout(() => clearInterval(stopTimer.current), 400);
+  };
+
+  const handleJoystickMove = (event) => {
+    if (!connected || !joystickRef.current) return;
+
+    const rect = joystickRef.current.getBoundingClientRect();
+    const pointerX = event.clientX ?? event.touches?.[0]?.clientX;
+    if (pointerX == null) return;
+
+    const centerX = rect.left + rect.width / 2;
+    const normalized = Math.max(-1, Math.min(1, (pointerX - centerX) / (rect.width / 2)));
+    setJoystickX(normalized);
+
+    if (normalized < -0.2) setSteer('left');
+    else if (normalized > 0.2) setSteer('right');
+    else setSteer('center');
+  };
+
+  const releaseJoystick = () => {
+    setJoystickX(0);
+    setSteer('center');
+  };
+
+  const capturePointer = (event) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
   };
 
   useEffect(() => {
@@ -146,22 +206,22 @@ export default function App() {
         case 'ArrowUp':
         case 'w':
         case 'W':
-          handleMove('Frente');
+          setDrive('forward');
           break;
         case 'ArrowDown':
         case 's':
         case 'S':
-          handleMove('Trás');
+          setDrive('stop');
           break;
         case 'ArrowLeft':
         case 'a':
         case 'A':
-          handleMove('Esquerda');
+          setSteer('left');
           break;
         case 'ArrowRight':
         case 'd':
         case 'D':
-          handleMove('Direita');
+          setSteer('right');
           break;
         case ' ':
           handleStop();
@@ -172,8 +232,10 @@ export default function App() {
     };
 
     const handleKeyUp = (e) => {
-      const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'W', 'a', 'A', 's', 'S', 'd', 'D'];
-      if (keys.includes(e.key)) handleStop();
+      const driveKeys = ['ArrowUp', 'ArrowDown', 'w', 'W', 's', 'S'];
+      const steerKeys = ['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'];
+      if (driveKeys.includes(e.key)) setDrive('stop');
+      if (steerKeys.includes(e.key)) setSteer('center');
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -182,26 +244,26 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      clearInterval(speedInterval.current);
-      clearInterval(stopTimer.current);
+      stopCommandLoop();
     };
-  }, [connected, commandForDirection]);
+  }, [connected]);
 
-  const ControlButton = ({ icon: Icon, direction }) => {
-    const isActive = status === direction;
+  const DriveButton = ({ icon: Icon, drive, title }) => {
+    const isActive = activeDrive === drive;
     return (
       <button
         type="button"
-        onMouseDown={() => handleMove(direction)}
-        onMouseUp={handleStop}
-        onMouseLeave={handleStop}
-        onTouchStart={(e) => {
-          e.preventDefault();
-          handleMove(direction);
+        onPointerDown={(e) => {
+          capturePointer(e);
+          setDrive(drive);
         }}
-        onTouchEnd={(e) => {
+        onPointerUp={(e) => {
           e.preventDefault();
-          handleStop();
+          setDrive('stop');
+        }}
+        onPointerCancel={(e) => {
+          e.preventDefault();
+          setDrive('stop');
         }}
         className={`relative group flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-lg transition-all duration-200 select-none touch-none ${
           isActive
@@ -209,7 +271,37 @@ export default function App() {
             : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white hover:border-white/20 shadow-lg'
         } border backdrop-blur-sm`}
         disabled={!connected}
-        title={direction}
+        title={title}
+      >
+        <Icon size={32} strokeWidth={isActive ? 2.5 : 1.5} className="relative z-10" />
+      </button>
+    );
+  };
+
+  const SteerButton = ({ icon: Icon, steer, title }) => {
+    const isActive = activeSteer === steer;
+    return (
+      <button
+        type="button"
+        onPointerDown={(e) => {
+          capturePointer(e);
+          setSteer(steer);
+        }}
+        onPointerUp={(e) => {
+          e.preventDefault();
+          setSteer('center');
+        }}
+        onPointerCancel={(e) => {
+          e.preventDefault();
+          setSteer('center');
+        }}
+        className={`relative group flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-lg transition-all duration-200 select-none touch-none ${
+          isActive
+            ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.4)] scale-95'
+            : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white hover:border-white/20 shadow-lg'
+        } border backdrop-blur-sm`}
+        disabled={!connected}
+        title={title}
       >
         <Icon size={32} strokeWidth={isActive ? 2.5 : 1.5} className="relative z-10" />
       </button>
@@ -324,16 +416,15 @@ export default function App() {
                 <div className="text-[8px] sm:text-[10px] text-slate-500 border border-white/10 px-2 py-1 rounded bg-black/30 hidden sm:block">WASD / SETAS</div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 sm:gap-3 justify-items-center">
+              <div className="hidden sm:grid grid-cols-3 gap-3 justify-items-center">
                 <div />
-                <ControlButton icon={ArrowUp} direction="Frente" />
+                <DriveButton icon={ArrowUp} drive="forward" title="Frente" />
                 <div />
-                <ControlButton icon={ArrowLeft} direction="Esquerda" />
+                <SteerButton icon={ArrowLeft} steer="left" title="Esquerda" />
                 <button
                   type="button"
-                  onMouseDown={handleStop}
-                  onTouchStart={(e) => {
-                    e.preventDefault();
+                  onPointerDown={(e) => {
+                    capturePointer(e);
                     handleStop();
                   }}
                   className="relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 hover:bg-red-500/20 transition-all active:scale-95 shadow-[inset_0_0_20px_rgba(239,68,68,0.1)] select-none touch-none"
@@ -341,10 +432,107 @@ export default function App() {
                 >
                   <StopCircle size={28} />
                 </button>
-                <ControlButton icon={ArrowRight} direction="Direita" />
+                <SteerButton icon={ArrowRight} steer="right" title="Direita" />
                 <div />
-                <ControlButton icon={ArrowDown} direction="Trás" />
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    capturePointer(e);
+                    setDrive('stop');
+                  }}
+                  className="relative flex items-center justify-center w-20 h-20 rounded-lg bg-white/5 border border-white/10 text-slate-500 hover:bg-white/10 transition-all select-none touch-none"
+                  disabled={!connected}
+                  title="Neutro"
+                >
+                  <ArrowDown size={32} strokeWidth={1.5} />
+                </button>
                 <div />
+              </div>
+
+              <div className="sm:hidden w-full space-y-5">
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      capturePointer(e);
+                      setDrive('forward');
+                    }}
+                    onPointerUp={(e) => {
+                      e.preventDefault();
+                      setDrive('stop');
+                    }}
+                    onPointerCancel={(e) => {
+                      e.preventDefault();
+                      setDrive('stop');
+                    }}
+                    className={`h-16 rounded-lg border flex items-center justify-center transition-all touch-none ${
+                      activeDrive === 'forward'
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.35)]'
+                        : 'bg-white/5 border-white/10 text-slate-400'
+                    }`}
+                    disabled={!connected}
+                    title="Frente"
+                  >
+                    <ArrowUp size={30} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      capturePointer(e);
+                      handleStop();
+                    }}
+                    className="h-16 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 flex items-center justify-center touch-none"
+                    title="Parar"
+                  >
+                    <StopCircle size={28} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      capturePointer(e);
+                      setDrive('stop');
+                    }}
+                    className="h-16 rounded-lg bg-white/5 border border-white/10 text-slate-500 flex items-center justify-center touch-none"
+                    disabled={!connected}
+                    title="Neutro"
+                  >
+                    <ArrowDown size={30} />
+                  </button>
+                </div>
+
+                <div
+                  ref={joystickRef}
+                  role="slider"
+                  aria-label="Direcao"
+                  aria-valuemin="-1"
+                  aria-valuemax="1"
+                  aria-valuenow={Number(joystickX.toFixed(2))}
+                  onPointerDown={(e) => {
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    handleJoystickMove(e);
+                  }}
+                  onPointerMove={handleJoystickMove}
+                  onPointerUp={releaseJoystick}
+                  onPointerCancel={releaseJoystick}
+                  className={`relative h-20 rounded-lg border overflow-hidden touch-none select-none ${
+                    connected ? 'bg-black/40 border-white/10' : 'bg-black/20 border-white/5 opacity-50'
+                  }`}
+                >
+                  <div className="absolute left-4 right-4 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/10" />
+                  <div className="absolute left-1/2 top-3 bottom-3 w-px bg-white/10" />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
+                    <ArrowLeft size={18} />
+                  </div>
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">
+                    <ArrowRight size={18} />
+                  </div>
+                  <div
+                    className="absolute top-1/2 left-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-400/70 bg-cyan-500/20 shadow-[0_0_18px_rgba(34,211,238,0.35)] transition-transform duration-75"
+                    style={{ transform: `translate(calc(-50% + ${joystickX * 92}px), -50%)` }}
+                  />
+                </div>
               </div>
             </div>
 
