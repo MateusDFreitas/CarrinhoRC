@@ -1,8 +1,9 @@
 import argparse
 import json
 import mimetypes
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
@@ -12,6 +13,10 @@ from carrinho_serial import ArduinoBridge
 
 DASHBOARD_DIR = PROJECT_ROOT / "dashboard"
 DIST_DIR = DASHBOARD_DIR / "dist"
+
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -122,7 +127,7 @@ def main():
     args = parser.parse_args()
 
     DashboardHandler.bridge = ArduinoBridge(serial_port=args.port, baud_rate=args.baud)
-    server = ThreadingHTTPServer((args.host, args.http_port), DashboardHandler)
+    server = ThreadedHTTPServer((args.host, args.http_port), DashboardHandler)
 
     print(f"[INFO] Dashboard em http://localhost:{args.http_port}")
     print(f"[INFO] Serial configurada: {args.port} @ {args.baud}")
