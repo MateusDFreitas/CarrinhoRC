@@ -51,6 +51,8 @@ make deps
 
 Isto instala `pyserial`.
 
+A dashboard esta travada em Vite 4 para funcionar com Node 16, como o `v16.20.2` comum na Jetson. Se o `npm audit` sugerir `npm audit fix --force`, nao use esse comando sem atualizar o Node antes, porque ele pode trocar o Vite por uma versao que exige Node 18+.
+
 ## Verificar ambiente
 
 ```bash
