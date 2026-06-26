@@ -3,23 +3,25 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: carrinhorc:humble
+    image: ${DOCKER_IMAGE:-carrinhorc:python}
     container_name: carrinhorc
-    network_mode: host
     privileged: true
+    stdin_open: true
+    tty: true
     environment:
-      CAMERA_INDEX: ${CAMERA_INDEX:-0}
-      CAMERA_SOURCE: ${CAMERA_SOURCE:-}
-      CAMERA_FPS: ${CAMERA_FPS:-60.0}
-      ENABLE_CAMERA: ${ENABLE_CAMERA:-true}
-      ENABLE_ROSBRIDGE: ${ENABLE_ROSBRIDGE:-true}
-      MAX_LINEAR_SPEED: ${MAX_LINEAR_SPEED:-1.0}
-      MAX_ANGULAR_SPEED: ${MAX_ANGULAR_SPEED:-1.0}
-      DASHBOARD_HOST: ${DASHBOARD_HOST:-0.0.0.0}
-      DASHBOARD_PORT: ${DASHBOARD_PORT:-5173}
-      ROSBRIDGE_URL: ${ROSBRIDGE_URL:-ws://localhost:9090}
-      ROSBRIDGE_PORT: ${ROSBRIDGE_PORT:-9090}
+      SERIAL_PORT: ${SERIAL_PORT:-/dev/ttyUSB0}
+      BAUD_RATE: ${BAUD_RATE:-115200}
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-8000}
+    ports:
+      - ${DASHBOARD_PORT:-8000}:${DASHBOARD_PORT:-8000}
     volumes:
-      - ./log:/workspace/log
       - /dev:/dev
-    command: ["/workspace/docker/run-system.sh"]
+    command:
+      - python3
+      - backend/server.py
+      - --port
+      - ${SERIAL_PORT:-/dev/ttyUSB0}
+      - --baud
+      - ${BAUD_RATE:-115200}
+      - --http-port
+      - ${DASHBOARD_PORT:-8000}

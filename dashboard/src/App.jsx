@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import ROSLIB from 'roslib';
 import {
   Activity,
   AlertTriangle,
@@ -15,7 +14,17 @@ import {
   WifiHigh,
 } from 'lucide-react';
 
-const ROSBRIDGE_URL = import.meta.env.VITE_ROSBRIDGE_URL || 'ws://localhost:9090';
+const ESC_STOP_PWM = 1500;
+const ESC_MIN_MOVE_PWM = 1580;
+const ESC_MAX_UI_PWM = 1800;
+const SERVO_RIGHT_PWM = 1000;
+const SERVO_CENTER_PWM = 1500;
+const SERVO_LEFT_PWM = 2000;
+
+function pwmFromSpeedLimit(speedLimit) {
+  if (speedLimit <= 0) return ESC_STOP_PWM;
+  return Math.round(ESC_MIN_MOVE_PWM + ((ESC_MAX_UI_PWM - ESC_MIN_MOVE_PWM) * speedLimit) / 100);
+}
 
 export default function App() {
   const [status, setStatus] = useState('Standby');
@@ -26,11 +35,9 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [cameraFrame, setCameraFrame] = useState('');
   const [logs, setLogs] = useState([
-    { time: new Date().toLocaleTimeString(), msg: 'DASHBOARD INICIADA. CONECTANDO AO ROSBRIDGE.' },
+    { time: new Date().toLocaleTimeString(), msg: 'DASHBOARD INICIADA. CONECTANDO AO BACKEND SERIAL.' },
   ]);
 
-  const rosRef = useRef(null);
-  const cmdTopicRef = useRef(null);
   const speedInterval = useRef(null);
   const stopTimer = useRef(null);
 
@@ -38,84 +45,63 @@ export default function App() {
     setLogs((prev) => [{ time: new Date().toLocaleTimeString(), msg }, ...prev].slice(0, 20));
   };
 
+  const applyBackendStatus = (backendStatus, latency) => {
+    setConnected(Boolean(backendStatus.connected));
+    setLatencyMs(latency);
+    setBattery(backendStatus.connected ? 100 : 0);
+    setCurrentSpeed(Math.max(0, Number(backendStatus.esc_pwm ?? ESC_STOP_PWM) - ESC_STOP_PWM));
+  };
+
+  const api = async (path, options = {}) => {
+    const startedAt = performance.now();
+    const response = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+    const latency = Math.round(performance.now() - startedAt);
+    const payload = await response.json();
+    if (payload.status) applyBackendStatus(payload.status, latency);
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || 'BACKEND_SERIAL_INDISPONIVEL');
+    }
+    return payload;
+  };
+
+  const refreshStatus = async (silent = false) => {
+    try {
+      await api('/api/status');
+    } catch (error) {
+      setConnected(false);
+      setLatencyMs('--');
+      setBattery(0);
+      if (!silent) addLog(`SERIAL_ERRO: ${error.message}`);
+    }
+  };
+
   useEffect(() => {
-    const ros = new ROSLIB.Ros({ url: ROSBRIDGE_URL });
-    rosRef.current = ros;
-
-    const cmdTopic = new ROSLIB.Topic({
-      ros,
-      name: '/cmd_vel',
-      messageType: 'geometry_msgs/Twist',
-    });
-    cmdTopicRef.current = cmdTopic;
-
-    const telemetryTopic = new ROSLIB.Topic({
-      ros,
-      name: '/rover/telemetry',
-      messageType: 'std_msgs/String',
-    });
-
-    const cameraTopic = new ROSLIB.Topic({
-      ros,
-      name: '/camera/image/compressed',
-      messageType: 'sensor_msgs/CompressedImage',
-      throttle_rate: 100,
-    });
-
-    ros.on('connection', () => {
-      setConnected(true);
-      addLog(`ROSBRIDGE_CONECTADO: ${ROSBRIDGE_URL}`);
-    });
-
-    ros.on('close', () => {
-      setConnected(false);
-      addLog('ROSBRIDGE_DESCONECTADO');
-    });
-
-    ros.on('error', () => {
-      setConnected(false);
-      addLog('ROSBRIDGE_ERRO: verifique ros2 launch rover_bringup rover.launch.py');
-    });
-
-    telemetryTopic.subscribe((message) => {
-      try {
-        const telemetry = JSON.parse(message.data);
-        setBattery(Number(telemetry.battery ?? 0));
-        setCurrentSpeed(Number(telemetry.speed ?? 0));
-        setLatencyMs(telemetry.latency_ms ?? '--');
-      } catch {
-        addLog('TELEMETRIA_INVALIDA');
-      }
-    });
-
-    cameraTopic.subscribe((message) => {
-      setCameraFrame(`data:image/jpeg;base64,${message.data}`);
-    });
-
-    return () => {
-      telemetryTopic.unsubscribe();
-      cameraTopic.unsubscribe();
-      cmdTopic.unadvertise();
-      ros.close();
-    };
+    refreshStatus();
+    const statusTimer = setInterval(() => refreshStatus(true), 2500);
+    return () => clearInterval(statusTimer);
   }, []);
 
-  const publishVelocity = (linear, angular) => {
-    if (!cmdTopicRef.current || !connected) return;
-    cmdTopicRef.current.publish(
-      new ROSLIB.Message({
-        linear: { x: linear, y: 0, z: 0 },
-        angular: { x: 0, y: 0, z: angular },
-      }),
-    );
+  const sendPwm = async (channel, value) => {
+    try {
+      await api('/api/command', {
+        method: 'POST',
+        body: JSON.stringify({ channel, value }),
+      });
+      addLog(`PWM_${channel.toUpperCase()}: ${value}`);
+    } catch (error) {
+      addLog(`SERIAL_ERRO: ${error.message}`);
+    }
   };
 
   const commandForDirection = useMemo(
     () => ({
-      Frente: { linear: speedLimit / 100, angular: 0 },
-      Trás: { linear: -speedLimit / 100, angular: 0 },
-      Esquerda: { linear: speedLimit / 200, angular: speedLimit / 100 },
-      Direita: { linear: speedLimit / 200, angular: -speedLimit / 100 },
+      Frente: { esc: pwmFromSpeedLimit(speedLimit), servo: SERVO_CENTER_PWM },
+      Trás: { esc: ESC_STOP_PWM, servo: SERVO_CENTER_PWM },
+      Esquerda: { servo: SERVO_LEFT_PWM },
+      Direita: { servo: SERVO_RIGHT_PWM },
     }),
     [speedLimit],
   );
@@ -126,22 +112,30 @@ export default function App() {
 
     setStatus(direction);
     addLog(`CMD_MOVE: ${direction.toUpperCase()}`);
-    publishVelocity(command.linear, command.angular);
+    if (command.servo) sendPwm('servo', command.servo);
+    if (command.esc) sendPwm('esc', command.esc);
 
     clearInterval(speedInterval.current);
     clearInterval(stopTimer.current);
     speedInterval.current = setInterval(() => {
-      publishVelocity(command.linear, command.angular);
-    }, 100);
+      if (command.servo) sendPwm('servo', command.servo);
+      if (command.esc) sendPwm('esc', command.esc);
+    }, 250);
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
     setStatus('Standby');
-    addLog('CMD_STOP: comando zero enviado');
+    addLog('CMD_STOP: E1500 S1500 enviado');
     clearInterval(speedInterval.current);
-    publishVelocity(0, 0);
     clearInterval(stopTimer.current);
-    stopTimer.current = setInterval(() => publishVelocity(0, 0), 100);
+    try {
+      await api('/api/stop', { method: 'POST', body: '{}' });
+    } catch (error) {
+      addLog(`SERIAL_ERRO: ${error.message}`);
+    }
+    stopTimer.current = setInterval(() => {
+      api('/api/stop', { method: 'POST', body: '{}' }).catch((error) => addLog(`SERIAL_ERRO: ${error.message}`));
+    }, 250);
     setTimeout(() => clearInterval(stopTimer.current), 400);
   };
 
@@ -237,9 +231,9 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-indigo-400">
-                ROVER<span className="text-white">OS</span>
+                CARRINHO<span className="text-white">RC</span>
               </h1>
-              <p className="text-cyan-500/60 text-[10px] sm:text-xs font-mono tracking-widest uppercase truncate">Telemetry & Control Unit</p>
+              <p className="text-cyan-500/60 text-[10px] sm:text-xs font-mono tracking-widest uppercase truncate">Serial Control Unit</p>
             </div>
           </div>
 
@@ -283,8 +277,8 @@ export default function App() {
               </div>
 
               <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-20 text-right font-mono text-[8px] sm:text-xs text-cyan-400/70 space-y-0.5 sm:space-y-1">
-                <p>TOPIC: /camera/image/compressed</p>
-                <p>ROS: {connected ? 'ONLINE' : 'OFFLINE'}</p>
+                <p>USB: {connected ? 'ONLINE' : 'OFFLINE'}</p>
+                <p>PROTOCOLO: E/S PWM</p>
               </div>
 
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 overflow-hidden">

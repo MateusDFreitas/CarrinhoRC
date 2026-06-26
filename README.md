@@ -1,171 +1,183 @@
 # CarrinhoRC
 
-Sistema ROS2 + dashboard web para um carrinho com webcam, ESC e servo de direcao.
+Controle em Python puro para um carrinho RC com Arduino ligado por USB, ESC e servo de direcao.
 
-## Arquitetura
+A Jetson envia comandos pela porta serial para o Arduino, e o Arduino deve interpretar linhas neste formato:
 
-- `src/rover_control`: nos ROS2 em Python para controle manual, telemetria e camera.
-- `src/rover_bringup`: launch principal do sistema.
-- `dashboard`: interface React integrada ao ROS2 via `rosbridge_server`.
+- `E1500`: PWM do ESC.
+- `S1500`: PWM do servo.
 
-## Topicos principais
+Cada comando termina com `\n`.
 
-- `/cmd_vel` (`geometry_msgs/msg/Twist`): comando manual vindo da dashboard.
-- `/rover/esc_pwm` (`std_msgs/msg/Int16`): PWM calculado para o ESC.
-- `/rover/servo_pwm` (`std_msgs/msg/Int16`): PWM calculado para o servo de direcao.
-- `/rover/telemetry` (`std_msgs/msg/String`): telemetria em JSON para a dashboard.
-- `/camera/image/compressed` (`sensor_msgs/msg/CompressedImage`): imagem JPEG da webcam.
+O firmware tambem aceita `E 1500`, `S 1500`, `P` e `C`.
 
-## Dependencias ROS2
+Convencao atual do servo:
 
-Instale os pacotes ROS2 esperados pelo launch:
+- `S1000`: direita total.
+- `S1500`: centro.
+- `S2000`: esquerda total.
 
-```bash
-sudo apt install ros-$ROS_DISTRO-rosbridge-server python3-opencv
+Convencao atual do ESC:
+
+- `E1500`: totalmente parado/neutro.
+- `E1580` em diante: minimo para comecar a andar.
+
+## Arquivos principais
+
+- `dashboard`: dashboard React original adaptada para controlar ESC e servo via USB serial.
+- `backend/server.py`: backend Python que serve a dashboard compilada e expõe a API serial.
+- `backend/carrinho_serial.py`: ponte serial compartilhada entre dashboard e terminal.
+- `tools/servoandesc.py`: terminal interativo para teste manual.
+- `arduino/CarrinhoRCFirmware/CarrinhoRCFirmware.ino`: firmware Arduino nao bloqueante para receber comandos em tempo real.
+
+## Estrutura
+
+```text
+arduino/                    firmware para o Arduino Nano
+backend/                    servidor HTTP e ponte serial em Python
+dashboard/                  frontend React/Vite
+tools/                      ferramentas de teste manual
+Dockerfile                  imagem para rodar backend + dashboard
+docker-compose.yml          execucao Docker com acesso a /dev
+Makefile                    comandos locais de desenvolvimento
+requirements.txt            dependencias Python
 ```
 
-Se for usar hardware real por GPIO/PWM, substitua ou estenda o no `rover_control.manual_control_node` no ponto onde ele publica os PWM calculados.
-
-## Como rodar com Makefile
-
-Fluxo principal:
+## Dependencias
 
 ```bash
 make deps
-make run
 ```
 
-O `make run` compila os pacotes ROS2, sobe o launch do carrinho e inicia a dashboard em `http://localhost:5173`.
+Isto instala `pyserial`.
 
-Alvos uteis:
+## Verificar ambiente
 
 ```bash
 make doctor
-make build
-make run-ros
-make run-dashboard
-make clean
 ```
 
-Parametros podem ser passados como variaveis:
+O comando verifica Python, `pyserial` e portas seriais como `/dev/ttyUSB0` e `/dev/ttyACM0`.
+
+## Rodar
 
 ```bash
-make run CAMERA_INDEX=0 CAMERA_FPS=60 DASHBOARD_PORT=5173
-make run ROSBRIDGE_URL=ws://IP_DO_ROBO:9090
-make run ENABLE_CAMERA=false
+make run
 ```
 
-## Como rodar com Docker
+Abra:
 
-O Docker evita depender do `apt` do host para instalar `rosbridge_server`.
+```text
+http://localhost:8000
+```
+
+O `make run` instala dependencias npm quando necessario, compila a dashboard React e sobe o backend Python.
+
+Por padrao usa:
+
+- Porta: `/dev/ttyUSB0`
+- Baud rate: `115200`
+- Dashboard: `http://localhost:8000`
+
+Para trocar:
+
+```bash
+make run SERIAL_PORT=/dev/ttyACM0 BAUD_RATE=115200 DASHBOARD_PORT=8001
+```
+
+Ou diretamente a dashboard:
+
+```bash
+python3 backend/server.py --port /dev/ttyUSB0 --baud 115200 --http-port 8000
+```
+
+Para usar o terminal interativo:
+
+```bash
+make run-serial
+```
+
+## Comandos no terminal
+
+Dentro do programa:
+
+```text
+E 1600
+S 1200
+P
+C
+sair
+```
+
+- `E <valor>` controla o ESC.
+- `S <valor>` controla o servo.
+- `P` envia parada/neutro: `E1500` e `S1500`.
+- `C` inicia a calibracao do ESC no firmware do Arduino.
+- `sair` encerra o programa.
+
+Para aceleracao:
+
+- `E 1500`: totalmente parado.
+- `E 1580`: minimo para comecar a andar.
+- `E 1600` ou mais: andando com mais potencia.
+
+Para direcao:
+
+- `S 1000`: direita total.
+- `S 1500`: centro.
+- `S 2000`: esquerda total.
+
+## Permissao da porta serial
+
+Se aparecer erro de permissao na Jetson/Linux, adicione seu usuario ao grupo `dialout`:
+
+```bash
+sudo usermod -aG dialout $USER
+```
+
+Depois saia da sessao e entre novamente.
+
+## Firmware Arduino
+
+Abra `arduino/CarrinhoRCFirmware/CarrinhoRCFirmware.ino` na Arduino IDE e grave na placa.
+
+Pinos usados:
+
+- Servo de direcao: `D9`.
+- ESC: `D10`.
+
+O firmware nao usa `Serial.parseInt()`, porque ele pode bloquear o loop esperando timeout quando a serial chega incompleta. O parser atual le byte a byte, processa comandos terminados em nova linha e tem failsafe: se o ESC estiver andando e ficar sem comando por 500 ms, volta para `E1500`.
+
+## Calibracao do ESC
+
+No Arduino Nano ATmega168P, a calibracao fica no proprio `CarrinhoRCFirmware.ino`. Na Arduino IDE, use:
+
+- Board: `Arduino Nano`
+- Processor: `ATmega168`
+- Baud do Monitor Serial: `115200`
+
+O firmware usa o pino `D10` para o ESC. Fluxo:
+
+1. Desconecte a bateria/alimentacao de potencia do ESC.
+2. Grave `arduino/CarrinhoRCFirmware/CarrinhoRCFirmware.ino` e deixe o Arduino ligado no USB.
+3. Abra o Monitor Serial em `115200`.
+4. Envie `C`.
+5. O Arduino passa a enviar `2000 us`.
+6. Conecte a bateria do ESC.
+7. Depois dos bipes, envie qualquer caractere no Monitor Serial.
+8. O Arduino envia `1000 us`.
+9. Depois dos bipes finais, envie qualquer caractere novamente.
+10. O Arduino volta para `1500 us` neutro/parado e retorna ao modo normal de controle.
+
+## Docker opcional
+
+O Docker tambem pode rodar o controle serial:
 
 ```bash
 make docker-build
-make docker-run
+make docker-run SERIAL_PORT=/dev/ttyUSB0
 ```
 
-Ou diretamente:
+Abra `http://localhost:8000`.
 
-```bash
-docker compose up --build
-```
-
-A dashboard fica em `http://localhost:5173` e o rosbridge em `ws://localhost:9090`.
-
-Para testar sem webcam:
-
-```bash
-make docker-run ENABLE_CAMERA=false
-```
-
-Para trocar o indice da webcam:
-
-```bash
-make docker-run CAMERA_INDEX=2
-```
-
-Se acessar a dashboard a partir de outro computador da rede, informe o IP do robo:
-
-```bash
-make docker-run ROSBRIDGE_URL=ws://IP_DO_ROBO:9090
-```
-
-Se `9090` ou `5173` ja estiverem em uso:
-
-```bash
-make docker-run DASHBOARD_PORT=5174 ROSBRIDGE_PORT=9091 ROSBRIDGE_URL=ws://localhost:9091
-```
-
-### Docker no Windows
-
-No Windows, Docker Desktop geralmente nao consegue acessar webcam USB como `/dev/video0`. Use uma camera em rede, por exemplo DroidCam, Iriun, OBS/RTSP, camera IP ou outro app que exponha HTTP/RTSP.
-
-Exemplos no PowerShell:
-
-```powershell
-$env:CAMERA_SOURCE="http://IP_DA_CAMERA:8080/video"
-$env:ROSBRIDGE_URL="ws://localhost:9090"
-docker compose up --build
-```
-
-Ou RTSP:
-
-```powershell
-$env:CAMERA_SOURCE="rtsp://IP_DA_CAMERA:8554/camera"
-docker compose up --build
-```
-
-Para limpar variaveis no PowerShell:
-
-```powershell
-Remove-Item Env:CAMERA_SOURCE
-```
-
-No Linux, deixe `CAMERA_SOURCE` vazio e use `CAMERA_INDEX`, que mapeia `/dev/video0`, `/dev/video1`, etc.
-
-## Como rodar manualmente
-
-Build do workspace:
-
-```bash
-source /opt/ros/$ROS_DISTRO/setup.bash
-colcon build
-source install/setup.bash
-```
-
-Suba o ROS2:
-
-```bash
-ros2 launch rover_bringup rover.launch.py
-```
-
-Em outro terminal, suba a dashboard:
-
-```bash
-cd dashboard
-npm install
-npm run dev
-```
-
-Abra a URL mostrada pelo Vite. Por padrao a dashboard conecta em `ws://localhost:9090`.
-
-Para apontar para outro host:
-
-```bash
-VITE_ROSBRIDGE_URL=ws://IP_DO_ROBO:9090 npm run dev
-```
-
-## Parametros uteis
-
-```bash
-ros2 launch rover_bringup rover.launch.py camera_index:=0 camera_source:="" camera_fps:=60 max_linear_speed:=1.0 max_angular_speed:=1.0 rosbridge_port:=9090
-```
-
-Os limites de PWM ficam no `manual_control_node`:
-
-- `esc_neutral_pwm`: 1500
-- `esc_min_pwm`: 1100
-- `esc_max_pwm`: 1900
-- `servo_center_pwm`: 1500
-- `servo_min_pwm`: 1000
-- `servo_max_pwm`: 2000
+Para controle de hardware real, normalmente e mais simples rodar direto na Jetson com `make run`.
