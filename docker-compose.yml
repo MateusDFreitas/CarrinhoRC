@@ -12,6 +12,11 @@ services:
       SERIAL_PORT: ${SERIAL_PORT:-/dev/ttyUSB0}
       BAUD_RATE: ${BAUD_RATE:-115200}
       DASHBOARD_PORT: ${DASHBOARD_PORT:-8000}
+      CAMERA_DEVICE: ${CAMERA_DEVICE:-/dev/video0}
+      CAMERA_WIDTH: ${CAMERA_WIDTH:-640}
+      CAMERA_HEIGHT: ${CAMERA_HEIGHT:-480}
+      CAMERA_FPS: ${CAMERA_FPS:-20}
+      CAMERA_QUALITY: ${CAMERA_QUALITY:-80}
     ports:
       - ${DASHBOARD_PORT:-8000}:${DASHBOARD_PORT:-8000}
     volumes:
@@ -25,3 +30,13 @@ services:
       - ${BAUD_RATE:-115200}
       - --http-port
       - ${DASHBOARD_PORT:-8000}
+      - --camera-device
+      - ${CAMERA_DEVICE:-/dev/video0}
+      - --camera-width
+      - ${CAMERA_WIDTH:-640}
+      - --camera-height
+      - ${CAMERA_HEIGHT:-480}
+      - --camera-fps
+      - ${CAMERA_FPS:-20}
+      - --camera-quality
+      - ${CAMERA_QUALITY:-80}

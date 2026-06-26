@@ -33,7 +33,7 @@ export default function App() {
   const [battery, setBattery] = useState(0);
   const [latencyMs, setLatencyMs] = useState('--');
   const [connected, setConnected] = useState(false);
-  const [cameraFrame, setCameraFrame] = useState('');
+  const [cameraFrame, setCameraFrame] = useState('/api/camera/stream');
   const [logs, setLogs] = useState([
     { time: new Date().toLocaleTimeString(), msg: 'DASHBOARD INICIADA. CONECTANDO AO BACKEND SERIAL.' },
   ]);
@@ -257,7 +257,12 @@ export default function App() {
           <div className="lg:col-span-8 order-1">
             <div className="relative w-full aspect-video bg-black rounded-lg border border-white/10 overflow-hidden shadow-2xl shadow-black/50 flex items-center justify-center group">
               {cameraFrame ? (
-                <img src={cameraFrame} alt="Camera frontal" className="absolute inset-0 h-full w-full object-cover" />
+                <img
+                  src={cameraFrame}
+                  alt="Camera frontal"
+                  className="absolute inset-0 h-full w-full object-cover"
+                  onError={() => setCameraFrame('')}
+                />
               ) : (
                 <div className="text-center z-0 opacity-30">
                   <Activity size={48} className="mx-auto mb-2 sm:mb-4 text-cyan-500 animate-pulse sm:w-[64px] sm:h-[64px]" />

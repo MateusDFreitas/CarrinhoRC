@@ -7,6 +7,11 @@ SERIAL_PORT ?= /dev/ttyUSB0
 BAUD_RATE ?= 115200
 DASHBOARD_HOST ?= 0.0.0.0
 DASHBOARD_PORT ?= 8000
+CAMERA_DEVICE ?= /dev/video0
+CAMERA_WIDTH ?= 640
+CAMERA_HEIGHT ?= 480
+CAMERA_FPS ?= 20
+CAMERA_QUALITY ?= 80
 DOCKER_IMAGE ?= carrinhorc:python
 COMPOSE ?= docker compose
 
@@ -30,6 +35,7 @@ help:
 	@echo "  SERIAL_PORT=$(SERIAL_PORT)"
 	@echo "  BAUD_RATE=$(BAUD_RATE)"
 	@echo "  DASHBOARD_PORT=$(DASHBOARD_PORT)"
+	@echo "  CAMERA_DEVICE=$(CAMERA_DEVICE)"
 
 deps: deps-python deps-dashboard
 
@@ -50,12 +56,17 @@ doctor:
 	@if ls /dev/ttyUSB* /dev/ttyACM* >/dev/null 2>&1; then ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null; else echo "Nenhuma /dev/ttyUSB* ou /dev/ttyACM* encontrada"; fi
 	@echo ""
 	@if test -e "$(SERIAL_PORT)"; then echo "OK: $(SERIAL_PORT) existe"; else echo "AVISO: $(SERIAL_PORT) nao existe"; fi
+	@echo ""
+	@echo "== OpenCV/camera =="
+	@$(PYTHON) -c 'import cv2; print("OK: opencv", cv2.__version__)' 2>/dev/null || echo "FALTANDO: instale python3-opencv ou opencv-python"
+	@if ls /dev/video* >/dev/null 2>&1; then ls -l /dev/video* 2>/dev/null; else echo "Nenhuma /dev/video* encontrada"; fi
+	@if test -e "$(CAMERA_DEVICE)"; then echo "OK: $(CAMERA_DEVICE) existe"; else echo "AVISO: $(CAMERA_DEVICE) nao existe"; fi
 
 build-dashboard: deps-dashboard
 	npm run build --prefix $(DASHBOARD_DIR)
 
 run dashboard run-dashboard: build-dashboard
-	$(PYTHON) backend/server.py --port "$(SERIAL_PORT)" --baud "$(BAUD_RATE)" --host "$(DASHBOARD_HOST)" --http-port "$(DASHBOARD_PORT)"
+	$(PYTHON) backend/server.py --port "$(SERIAL_PORT)" --baud "$(BAUD_RATE)" --host "$(DASHBOARD_HOST)" --http-port "$(DASHBOARD_PORT)" --camera-device "$(CAMERA_DEVICE)" --camera-width "$(CAMERA_WIDTH)" --camera-height "$(CAMERA_HEIGHT)" --camera-fps "$(CAMERA_FPS)" --camera-quality "$(CAMERA_QUALITY)"
 
 run-serial:
 	$(PYTHON) tools/servoandesc.py --port "$(SERIAL_PORT)" --baud "$(BAUD_RATE)"
@@ -67,6 +78,11 @@ docker-run:
 	SERIAL_PORT="$(SERIAL_PORT)" \
 	BAUD_RATE="$(BAUD_RATE)" \
 	DASHBOARD_PORT="$(DASHBOARD_PORT)" \
+	CAMERA_DEVICE="$(CAMERA_DEVICE)" \
+	CAMERA_WIDTH="$(CAMERA_WIDTH)" \
+	CAMERA_HEIGHT="$(CAMERA_HEIGHT)" \
+	CAMERA_FPS="$(CAMERA_FPS)" \
+	CAMERA_QUALITY="$(CAMERA_QUALITY)" \
 	DOCKER_IMAGE="$(DOCKER_IMAGE)" \
 	$(COMPOSE) up --build
 

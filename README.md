@@ -25,7 +25,8 @@ Convencao atual do ESC:
 ## Arquivos principais
 
 - `dashboard`: dashboard React original adaptada para controlar ESC e servo via USB serial.
-- `backend/server.py`: backend Python que serve a dashboard compilada e expõe a API serial.
+- `backend/server.py`: backend Python que serve a dashboard compilada e expõe a API serial e o stream da camera.
+- `backend/camera_stream.py`: captura a camera com OpenCV e expõe frames MJPEG.
 - `backend/carrinho_serial.py`: ponte serial compartilhada entre dashboard e terminal.
 - `tools/servoandesc.py`: terminal interativo para teste manual.
 - `arduino/CarrinhoRCFirmware/CarrinhoRCFirmware.ino`: firmware Arduino nao bloqueante para receber comandos em tempo real.
@@ -49,7 +50,13 @@ requirements.txt            dependencias Python
 make deps
 ```
 
-Isto instala `pyserial`.
+Isto instala `pyserial` e `opencv-python-headless` para o stream da camera.
+
+Na Jetson, se a instalacao do OpenCV via pip nao funcionar bem, use o pacote do sistema:
+
+```bash
+sudo apt install python3-opencv
+```
 
 A dashboard esta travada em Vite 4 para funcionar com Node 16, como o `v16.20.2` comum na Jetson. Se o `npm audit` sugerir `npm audit fix --force`, nao use esse comando sem atualizar o Node antes, porque ele pode trocar o Vite por uma versao que exige Node 18+.
 
@@ -59,7 +66,7 @@ A dashboard esta travada em Vite 4 para funcionar com Node 16, como o `v16.20.2`
 make doctor
 ```
 
-O comando verifica Python, `pyserial` e portas seriais como `/dev/ttyUSB0` e `/dev/ttyACM0`.
+O comando verifica Python, `pyserial`, OpenCV, portas seriais como `/dev/ttyUSB0` e `/dev/ttyACM0`, e cameras como `/dev/video0`.
 
 ## Rodar
 
@@ -79,6 +86,8 @@ Por padrao usa:
 
 - Porta: `/dev/ttyUSB0`
 - Baud rate: `115200`
+- Camera: `/dev/video0`
+- Video: `640x480 @ 20fps`
 - Dashboard: `http://localhost:8000`
 
 Para trocar:
@@ -87,10 +96,22 @@ Para trocar:
 make run SERIAL_PORT=/dev/ttyACM0 BAUD_RATE=115200 DASHBOARD_PORT=8001
 ```
 
+Para trocar a camera:
+
+```bash
+make run CAMERA_DEVICE=/dev/video1 CAMERA_WIDTH=1280 CAMERA_HEIGHT=720 CAMERA_FPS=15
+```
+
 Ou diretamente a dashboard:
 
 ```bash
-python3 backend/server.py --port /dev/ttyUSB0 --baud 115200 --http-port 8000
+python3 backend/server.py --port /dev/ttyUSB0 --baud 115200 --http-port 8000 --camera-device /dev/video0
+```
+
+O stream fica em:
+
+```text
+http://localhost:8000/api/camera/stream
 ```
 
 Para usar o terminal interativo:
