@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 
+from camera_stream import CameraStream
 from carrinho_serial import ArduinoBridge
 
 DASHBOARD_DIR = PROJECT_ROOT / "dashboard"
@@ -21,6 +22,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 class DashboardHandler(BaseHTTPRequestHandler):
     bridge = None
+    camera = None
 
     def log_message(self, fmt, *args):
         print(f"[HTTP] {self.address_string()} - {fmt % args}")
@@ -38,6 +40,32 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if length <= 0:
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def _serve_camera_stream(self):
+        if not self.camera or not self.camera.available:
+            self._send_json(503, {"ok": False, "camera": self.camera.status() if self.camera else None})
+            return
+
+        if not self.camera.open():
+            self._send_json(503, {"ok": False, "camera": self.camera.status()})
+            return
+
+        self.send_response(200)
+        self.send_header("Age", "0")
+        self.send_header("Cache-Control", "no-cache, private")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.end_headers()
+
+        try:
+            for jpeg in self.camera.frames():
+                self.wfile.write(b"--frame\r\n")
+                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                self.wfile.write(f"Content-Length: {len(jpeg)}\r\n\r\n".encode("ascii"))
+                self.wfile.write(jpeg)
+                self.wfile.write(b"\r\n")
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _serve_static(self, path, include_body=True):
         static_root = DIST_DIR
@@ -71,7 +99,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/api/status":
-            self._send_json(200, {"ok": True, "status": self.bridge.status()})
+            self._send_json(200, {"ok": True, "status": self.bridge.status(), "camera": self.camera.status() if self.camera else None})
+            return
+        if path == "/api/camera/status":
+            self._send_json(200, {"ok": True, "camera": self.camera.status() if self.camera else None})
+            return
+        if path == "/api/camera/stream":
+            self._serve_camera_stream()
             return
         self._serve_static(path)
 
@@ -124,13 +158,28 @@ def main():
     parser.add_argument("--baud", type=int, default=115200, help="Baud rate da serial")
     parser.add_argument("--host", default="0.0.0.0", help="Host HTTP")
     parser.add_argument("--http-port", type=int, default=8000, help="Porta HTTP da dashboard")
+    parser.add_argument("--camera-device", default="/dev/video0", help="Dispositivo da camera")
+    parser.add_argument("--camera-width", type=int, default=640, help="Largura do video da camera")
+    parser.add_argument("--camera-height", type=int, default=480, help="Altura do video da camera")
+    parser.add_argument("--camera-fps", type=int, default=20, help="FPS do stream da camera")
+    parser.add_argument("--camera-quality", type=int, default=80, help="Qualidade JPEG do stream da camera")
     args = parser.parse_args()
 
     DashboardHandler.bridge = ArduinoBridge(serial_port=args.port, baud_rate=args.baud)
+    DashboardHandler.camera = CameraStream(
+        device=args.camera_device,
+        width=args.camera_width,
+        height=args.camera_height,
+        fps=args.camera_fps,
+        quality=args.camera_quality,
+    )
     server = ThreadedHTTPServer((args.host, args.http_port), DashboardHandler)
 
     print(f"[INFO] Dashboard em http://localhost:{args.http_port}")
     print(f"[INFO] Serial configurada: {args.port} @ {args.baud}")
+    print(f"[INFO] Camera configurada: {args.camera_device} ({args.camera_width}x{args.camera_height} @ {args.camera_fps}fps)")
+    if not DashboardHandler.camera.available:
+        print("[AVISO] OpenCV nao instalado. Instale python3-opencv ou opencv-python para usar a camera.")
 
     try:
         server.serve_forever()
@@ -138,6 +187,7 @@ def main():
         print("\n[INFO] Encerrando dashboard...")
     finally:
         DashboardHandler.bridge.close()
+        DashboardHandler.camera.close()
         server.server_close()
 
 
